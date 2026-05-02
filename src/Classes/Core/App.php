@@ -4,68 +4,77 @@ namespace Illea\TestExerice\Classes\Core;
 
 use Illea\TestExerice\Classes\Base\Cart;
 use Illea\TestExerice\Classes\Base\Grid;
-use Illea\TestExerice\Classes\Commands\CommandFactory;
 use Illea\TestExerice\Classes\Contracts\AppInterface;
 use Illea\TestExerice\Classes\Exceptions\InvalidCommandException;
+use Illea\TestExerice\Classes\Input\KeyboardInput;
+use Illea\TestExerice\Classes\Renderer\GridRenderer;
 
 class App implements AppInterface
 {
-    private array $config; // Конфігурація програми
-
-    private Grid $grid; // Сітка
-
-    private Cart $cart; // Візок
-
-    private CommandExecutor $executor; // Виконавець команд
+    private array $config;
+    private Grid $grid;
+    private Cart $cart;
+    private GameState $gameState;
+    private GridRenderer $renderer;
+    private KeyboardInput $keyboard;
+    private int $moveCount = 0;
 
     public function __construct()
     {
-        $this->config = require_once dirname(__DIR__, 2).'/config.php'; // Завантаження конфігурації
-        $this->init(); // Ініціалізація компонентів
+        $this->config = require_once dirname(__DIR__, 2) . '/config.php';
+        $this->init();
     }
 
     public function run(): void
     {
-        echo "\033[33mGrid size: ".$this->grid->getHeight().'x'.$this->grid->getWidth()."\033[0m".PHP_EOL; // Виведення розміру сітки
+        $this->renderer->render($this->grid, $this->cart, $this->gameState);
+
         while (true) {
-            echo "\033[36mEnter command (or type 'exit' to quit): \033[0m"; // Запит команди
-            $commandInput = trim(fgets(STDIN)); // Зчитування команди
-            if (strtolower($commandInput) === 'exit') {
-                break; // Вихід з програми
+            $key = $this->keyboard->readKey();
+
+            if ($key === 'QUIT') {
+                break;
             }
-            try {
-                $this->handle($commandInput); // Обробка команди
-            } catch (InvalidCommandException $e) {
-                echo "\033[31mError: ".$e->getMessage()."\033[0m".PHP_EOL; // Виведення помилки
+
+            $moved = $this->processKey($key);
+
+            if ($moved) {
+                $pos = $this->cart->getPosition();
+                $this->gameState->update($pos['x'], $pos['y']);
             }
+
+            if ($this->gameState->isWon()) {
+                $this->renderer->renderWin($this->gameState->getTotalItems(), $this->moveCount);
+                break;
+            }
+
+            $this->renderer->render($this->grid, $this->cart, $this->gameState);
         }
+
+        $this->keyboard->close();
     }
 
-    /**
-     * @throws InvalidCommandException
-     */
-    private function handle(string $commandInput): void
+    private function processKey(string $key): bool
     {
-        $this->executor->executeCommand($commandInput); // Виконання команди
-        echo "\033[32mCart position: (".$this->cart->getPosition()['x'].', '.$this->cart->getPosition()['y'].")\033[0m".PHP_EOL; // Виведення позиції візка
-        echo "\033[35mCarrying item: ".($this->cart->isCarryingItem() ? 'Yes' : 'No')."\033[0m".PHP_EOL; // Виведення стану перенесення товару
+        if (!in_array($key, ['UP', 'DOWN', 'LEFT', 'RIGHT'])) {
+            return false;
+        }
+
+        try {
+            $this->cart->move($key, 1);
+            $this->moveCount++;
+            return true;
+        } catch (InvalidCommandException) {
+            return false;
+        }
     }
 
     private function init(): void
     {
-        $this->grid = new Grid($this->getHeight(), $this->getWidth()); // Створення сітки
-        $this->cart = new Cart($this->grid); // Створення візка
-        $commandFactory = new CommandFactory($this->cart); // Створення фабрики команд
-        $this->executor = new CommandExecutor($commandFactory); // Створення виконавця команд
-    }
-
-    private function getHeight(): int
-    {
-        return $this->config['grid']['height']; // Отримання висоти сітки з конфігурації
-    }
-
-    private function getWidth(): int
-    {
-        return $this->config['grid']['width']; // Отримання ширини сітки з конфігурації
+        $this->grid      = new Grid($this->config['grid']['height'], $this->config['grid']['width']);
+        $this->cart      = new Cart($this->grid);
+        $this->gameState = new GameState($this->config['goal'], $this->config['items']);
+        $this->renderer  = new GridRenderer();
+        $this->keyboard  = new KeyboardInput();
     }
 }
